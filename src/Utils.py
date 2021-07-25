@@ -15,9 +15,8 @@ import torchvision.transforms as T
 # TODO: Remove masks (?)
 
 class Dataset(torch.utils.data.Dataset):
-    def __init__(self, path, inputs, img_size, batch_size, segm_size=4):
+    def __init__(self, path, inputs, img_size, segm_size=4):
         self.path = path
-        self.batch_size = batch_size
         self.img_size = img_size
         self.transforms = T.Compose([
                         T.ToTensor(),
@@ -73,16 +72,20 @@ def predRecon(test_dataset):
     
     best_model = torch.load('./pytorch_best_model.pth')
     
-    preds = np.array(len(test_dataset), dtype=np.object)
+    preds = np.zeros(len(test_dataset), dtype=object)
     
-    for i in range(len(test_dataset)):
-        
-        image = test_dataset[i][0]
-        
-        x_tensor = torch.from_numpy(image).to('cuda').unsqueeze(0)
-        pr_mask = best_model.predict(x_tensor)
-        pr_mask = pr_mask.squeeze().cpu().numpy().round()
-        
-        preds[i] = cv.bitwise_and(image, image, mask=pr_mask)
+    with torch.no_grad():
+        for i, data in enumerate(test_dataset):
+            
+            image = data.cpu().numpy()[0, 0, :,:,:].T
+            
+            x_tensor = data.to('cuda').unsqueeze(0)
+            pr_mask = best_model(x_tensor)
+            pr_mask = pr_mask.squeeze().cpu().numpy().round()
+            
+            # Cast to uint8
+            pr_mask = np.uint8(pr_mask.reshape(image.shape)*255)
+            
+            preds[i] = pr_mask
     
     return preds
