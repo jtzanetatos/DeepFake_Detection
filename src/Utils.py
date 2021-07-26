@@ -67,25 +67,52 @@ class Dataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.imgs)
 
-def predRecon(test_dataset):
+def optimizers(alg, lr, weight_decay, model):
     
     
-    best_model = torch.load('./pytorch_best_model.pth')
+    learners = {'adam': torch.optim.Adam(params=model.parameters(),
+                                         lr=lr,
+                                         weight_decay=weight_decay),
+                
+                'adadelta': torch.optim.Adadelta(params=model.parameters(),
+                                                 lr=lr,
+                                                 weight_decay=weight_decay),
+                
+                'adagrad' : torch.optim.Adagrad(params=model.parameters(),
+                                                lr=lr,
+                                                weight_decay=weight_decay),
+                
+                'adamw' : torch.optim.AdamW(params=model.parameters(),
+                                            weight_decay=weight_decay,
+                                            amsgrad=False),
+                
+                'sparseadam' : torch.optim.SparseAdam(params=model.parameters(),
+                                                      lr=lr),
+                
+                'adamax' : torch.optim.Adamax(params=model.parameters(),
+                                              lr=lr,
+                                              weight_decay=weight_decay),
+                
+                'asgd' : torch.optim.ASGD(params=model.parameters(),
+                                          lr=lr,
+                                          weight_decay=weight_decay),
+                
+                'lbfgs' : torch.optim.LBFGS(params=model.parameters(),
+                                            lr=lr,
+                                            max_iter=20),
+                
+                'rmsprop' : torch.optim.RMSprop(params=model.parameters(),
+                                                lr=lr,
+                                                weight_decay=weight_decay,
+                                                centered=False),
+                
+                'rprop' : torch.optim.Rprop(params=model.parameters(),
+                                            lr=lr),
+                
+                'sgd' : torch.optim.SGD(params=model.parameters(),
+                                        lr=lr,
+                                        weight_decay=weight_decay,
+                                        nesterov=False),
+                }
     
-    preds = np.zeros(len(test_dataset), dtype=object)
-    
-    with torch.no_grad():
-        for i, data in enumerate(test_dataset):
-            
-            image = data.cpu().numpy()[0, 0, :,:,:].T
-            
-            x_tensor = data.to('cuda').unsqueeze(0)
-            pr_mask = best_model(x_tensor)
-            pr_mask = pr_mask.squeeze().cpu().numpy().round()
-            
-            # Cast to uint8
-            pr_mask = np.uint8(pr_mask.reshape(image.shape)*255)
-            
-            preds[i] = pr_mask
-    
-    return preds
+    return learners[alg]

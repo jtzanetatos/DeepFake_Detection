@@ -6,14 +6,13 @@ Created on Sat Jul 24 22:57:43 2021
 """
 
 import torch
-from Utils import Dataset, predRecon
+from Utils import Dataset, optimizers
 from Models import UAutoencoder, ConvAutoencoder
 import torch.nn as nn
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 import os
 from tqdm import tqdm
-from Conv_Autoenc import ConvAutoencoder
 import sys
 
 def make_train_step(model, loss_fn, optimizer):
@@ -42,12 +41,12 @@ def main():
     kwargs = {'num_workers': 1, 'pin_memory': True} if device=='cuda' else {}
     EPOCH=1
     lr = 1e-2
-    algo = 'adam'
+    alg = 'adam'
     img_size = (256, 256)
     segm_size = 4
     batch_size = 1
     
-    path = '../../dataset/dataset1/'
+    path = '../dataset/dataset1/'
     
     train, test = train_test_split(os.listdir(path),
                                    train_size=0.6,
@@ -73,58 +72,13 @@ def main():
                                            shuffle=True,
                                            **kwargs)
     
-    model = ConvAutoencoder(img_size[0]).to(device)
+    model = UAutoencoder(img_size[0]).to(device)
     metrics = nn.MSELoss()
     
     
     weight_decay = 0.00005
     
-    learners = {'adam': torch.optim.Adam(params=model.parameters(),
-                                         lr=lr,
-                                         weight_decay=weight_decay),
-                
-                'adadelta': torch.optim.Adadelta(params=model.parameters(),
-                                                 lr=lr,
-                                                 weight_decay=weight_decay),
-                
-                'adagrad' : torch.optim.Adagrad(params=model.parameters(),
-                                                lr=lr,
-                                                weight_decay=weight_decay),
-                
-                'adamw' : torch.optim.AdamW(params=model.parameters(),
-                                            weight_decay=weight_decay,
-                                            amsgrad=False),
-                
-                'sparseadam' : torch.optim.SparseAdam(params=model.parameters(),
-                                                      lr=lr),
-                
-                'adamax' : torch.optim.Adamax(params=model.parameters(),
-                                              lr=lr,
-                                              weight_decay=weight_decay),
-                
-                'asgd' : torch.optim.ASGD(params=model.parameters(),
-                                          lr=lr,
-                                          weight_decay=weight_decay),
-                
-                'lbfgs' : torch.optim.LBFGS(params=model.parameters(),
-                                            lr=lr,
-                                            max_iter=20),
-                
-                'rmsprop' : torch.optim.RMSprop(params=model.parameters(),
-                                                lr=lr,
-                                                weight_decay=weight_decay,
-                                                centered=False),
-                
-                'rprop' : torch.optim.Rprop(params=model.parameters(),
-                                            lr=lr),
-                
-                'sgd' : torch.optim.SGD(params=model.parameters(),
-                                        lr=lr,
-                                        weight_decay=weight_decay,
-                                        nesterov=False),
-                }
-    
-    optimizer = learners[algo]
+    optimizer = optimizers(alg, lr, weight_decay, model)
     
     
     max_score = 0
@@ -145,7 +99,8 @@ def main():
             
             inputs = data.to(device)
             
-            inputs = inputs.reshape(1, -1)
+            if model.__class__.__name__=='UAutoencoder':
+                inputs = inputs.reshape(1, -1)
             
             optimizer.zero_grad()
             
@@ -175,12 +130,12 @@ def main():
     # Clear gpu memory
     torch.cuda.empty_cache()
     
-    return predRecon(test_set), lrs
+    return model.predict(test_set, img_shape=(256, 256, 3)), lrs
 
 if __name__ == "__main__":
-    try:
-        preds, loss = main()
-    except Exception as e:
-        # Clear gpu memory
-        torch.cuda.empty_cache()
-        sys.exit(print(e))
+    # try:
+    preds, loss = main()
+    # except Exception as e:
+    #     # Clear gpu memory
+    #     torch.cuda.empty_cache()
+    #     sys.exit(print(e))
