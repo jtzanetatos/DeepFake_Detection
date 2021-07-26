@@ -9,62 +9,64 @@ import torch.nn as nn
 import torch
 import numpy as np
 
-# TODO: Change input/output image dimensions
-
 class UAutoencoder(nn.Module):
-    def __init__(self, img_size):
+    def __init__(self, img_size, batch_size):
         super(UAutoencoder, self).__init__()
         
         self.inShape = img_size
         
         self.layers = nn.Sequential(
             # Encoder
-            # nn.Flatten(),
-            nn.Linear(in_features=self.inShape*self.inShape*3, out_features=256),
+            nn.Linear(in_features=self.inShape*self.inShape*3*batch_size,
+                      out_features=128*batch_size),
             nn.ReLU(),
-            nn.Linear(in_features=256, out_features=128),
+            nn.Linear(in_features=128*batch_size, out_features=64*batch_size),
             nn.ReLU(),
-            nn.Linear(in_features=128, out_features=64),
+            nn.Linear(in_features=64*batch_size, out_features=32*batch_size),
             nn.ReLU(),
-            nn.Linear(in_features=64, out_features=32),
-            nn.ReLU(),
-            nn.Linear(in_features=32, out_features=16),
+            nn.Linear(in_features=32*batch_size, out_features=16*batch_size),
             nn.ReLU(),
             
             # Decoder
-            nn.Linear(in_features=16, out_features=32),
+            nn.Linear(in_features=16*batch_size, out_features=32*batch_size),
             nn.ReLU(),
-            nn.Linear(in_features=32, out_features=64),
+            nn.Linear(in_features=32*batch_size, out_features=64*batch_size),
             nn.ReLU(),
-            nn.Linear(in_features=64, out_features=128),
+            nn.Linear(in_features=64*batch_size, out_features=128*batch_size),
             nn.ReLU(),
-            nn.Linear(in_features=128, out_features=256),
-            nn.ReLU(),
-            nn.Linear(in_features=256, out_features=self.inShape*self.inShape*3),
+            nn.Linear(in_features=128*batch_size,
+                      out_features=self.inShape*self.inShape*3*batch_size),
             nn.Sigmoid())
     
     def forward(self, x):
         
         return self.layers(x)
     
-    def predict(self, dataset, img_shape):
-        best_model = torch.load('./pytorch_best_model.pth')
-    
-        preds = np.zeros(len(dataset), dtype=object)
+    def predict(self, model, dataset, batch_size, img_shape):
+        
+        preds = np.zeros(len(dataset)*batch_size, dtype=object)
+        
+        idx = 0
         
         with torch.no_grad():
             for i, data in enumerate(dataset):
                 
-                x_tensor = data.to('cuda').reshape(1, -1)
-                pr_mask = best_model(x_tensor)
-                pr_mask = pr_mask.squeeze().cpu().numpy().round()
-                
-                # Cast to uint8
-                pr_mask = np.uint8(pr_mask.reshape(img_shape)*255)
-                
-                preds[i] = pr_mask
+                if data.shape[0] > 1:
+                    for j, batch in enumerate(data):
+                        preds[idx] = self._output(model, data[j], img_shape)
+                        idx += 1
+                else:
+                    preds[i] = self._output(model, data, img_shape)
         
         return preds
+    
+    def _output(self, model, data, img_shape):
+        
+        x_tensor = data.to('cuda').reshape(1, -1)
+        pred = model(x_tensor)
+        pred = pred.squeeze().cpu().numpy().round()
+        
+        return pred.T
 
 class ConvAutoencoder(nn.Module):
     def __init__(self):
@@ -102,21 +104,30 @@ class ConvAutoencoder(nn.Module):
         
         return self.layers(x)
     
-    def predict(self, dataset, img_shape):
-        best_model = torch.load('./pytorch_best_model.pth')
+    def predict(self, model, dataset, batch_size, img_shape):
         
-        preds = np.zeros(len(dataset), dtype=object)
+        preds = np.zeros(len(dataset)*batch_size, dtype=object)
+        
+        idx = 0
         
         with torch.no_grad():
             for i, data in enumerate(dataset):
                 
-                x_tensor = data.to('cuda')
-                pr_mask = best_model(x_tensor)
-                pr_mask = pr_mask.squeeze().cpu().numpy().round()
-                
-                # Cast to uint8
-                pr_mask = np.uint8(pr_mask.reshape(img_shape)*255)
-                
-                preds[i] = pr_mask
+                if data.shape[0] > 1:
+                    for j, batch in enumerate(data):
+                        preds[idx] = self._output(model,
+                                                  data[j].unsqueeze(0),
+                                                  img_shape)
+                        idx += 1
+                else:
+                    preds[i] = self._output(model, data, img_shape)
         
         return preds
+    
+    def _output(self, model, data, img_shape):
+        
+        x_tensor = data.to('cuda')
+        pred = model(x_tensor)
+        pred = pred.squeeze().cpu().numpy().round()
+        
+        return pred.T

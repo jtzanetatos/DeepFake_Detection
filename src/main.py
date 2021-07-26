@@ -37,13 +37,17 @@ def make_train_step(model, loss_fn, optimizer):
 
 def main():
     
+    
+    torch.manual_seed(42)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
     device = "cuda" if torch.cuda.is_available() else "cpu"
     kwargs = {'num_workers': 1, 'pin_memory': True} if device=='cuda' else {}
-    EPOCH=1
-    lr = 1e-2
+    EPOCH=4
+    lr = 1e-3
     alg = 'adam'
     img_size = (256, 256)
-    segm_size = 4
+    segm_size = 1
     batch_size = 1
     
     path = '../dataset/dataset1/'
@@ -71,17 +75,17 @@ def main():
                                            batch_size=batch_size,
                                            shuffle=True,
                                            **kwargs)
-    
-    model = UAutoencoder(img_size[0]).to(device)
-    metrics = nn.MSELoss()
-    
+    # OOM for Undercomplete encoder with batch size > 1
+    model = UAutoencoder(img_size[0], batch_size=1).to(device)
+    # model = ConvAutoencoder().to(device)
+    metrics = nn.BCELoss()
     
     weight_decay = 0.00005
     
     optimizer = optimizers(alg, lr, weight_decay, model)
     
     
-    max_score = 0
+    max_score = 0.0
     lrs = []
     
     # train_step = make_train_step(model, metrics, optimizer)
@@ -100,7 +104,7 @@ def main():
             inputs = data.to(device)
             
             if model.__class__.__name__=='UAutoencoder':
-                inputs = inputs.reshape(1, -1)
+                inputs = inputs.view(-1, img_size[0]*img_size[1])
             
             optimizer.zero_grad()
             
@@ -130,12 +134,12 @@ def main():
     # Clear gpu memory
     torch.cuda.empty_cache()
     
-    return model.predict(test_set, img_shape=(256, 256, 3)), lrs
+    return model.predict(model, test_set, batch_size, img_shape=(256, 256, 3)), lrs
 
 if __name__ == "__main__":
-    # try:
-    preds, loss = main()
-    # except Exception as e:
-    #     # Clear gpu memory
-    #     torch.cuda.empty_cache()
-    #     sys.exit(print(e))
+    try:
+        preds, loss = main()
+    except Exception as e:
+        # Clear gpu memory
+        torch.cuda.empty_cache()
+        sys.exit(print(e))

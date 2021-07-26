@@ -24,8 +24,8 @@ class Dataset(torch.utils.data.Dataset):
                                     std=[0.229, 0.224, 0.225],),
                         ])
         self.segm_size=segm_size
-        self.kernel_size=(self.img_size[0]//(segm_size//2),
-                          self.img_size[1]//(segm_size//2))
+        # self.kernel_size=(self.img_size[0]//(segm_size//2),
+        #                   self.img_size[1]//(segm_size//2))
         self.kernel_idx = 0
         
         # load all image files, sorting them to
@@ -60,7 +60,7 @@ class Dataset(torch.utils.data.Dataset):
         #     # Reset kernel index flag
         #     self.kernel_idx = 0
         
-        img = self.transforms(img).unsqueeze(0)
+        img = self.transforms(img)
         
         return img
     
