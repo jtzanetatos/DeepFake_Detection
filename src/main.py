@@ -15,26 +15,6 @@ import os
 from tqdm import tqdm
 import sys
 
-def make_train_step(model, loss_fn, optimizer):
-    # Builds function that performs a step in the train loop
-    def train_step(x):
-        # Sets model to TRAIN mode
-        model.train()
-        # Makes predictions
-        yhat = model(x)
-        # Computes loss
-        loss = loss_fn(x, yhat)
-        # Computes gradients
-        loss.backward()
-        # Updates parameters and zeroes gradients
-        optimizer.step()
-        optimizer.zero_grad()
-        # Returns the loss
-        return loss.item()
-    
-    # Returns the function that will be called inside the train loop
-    return train_step
-
 def main():
     
     
@@ -43,12 +23,12 @@ def main():
     torch.backends.cudnn.benchmark = False
     device = "cuda" if torch.cuda.is_available() else "cpu"
     kwargs = {'num_workers': 1, 'pin_memory': True} if device=='cuda' else {}
-    EPOCH=4
+    EPOCH=20
     lr = 1e-3
     alg = 'adam'
     img_size = (256, 256)
     segm_size = 1
-    batch_size = 1
+    batch_size = 6
     
     path = '../dataset/dataset1/'
     
@@ -66,18 +46,18 @@ def main():
                                             shuffle=True,
                                             **kwargs)
     
-    dataset_test = Dataset(path=path,
+    dataset_val = Dataset(path=path,
                            img_size=img_size,
                            segm_size=segm_size,
                            inputs=test[:len(test)//8])
     
-    test_set = torch.utils.data.DataLoader(dataset_test,
+    val_set = torch.utils.data.DataLoader(dataset_val,
                                            batch_size=batch_size,
                                            shuffle=True,
                                            **kwargs)
     # OOM for Undercomplete encoder with batch size > 1
-    model = UAutoencoder(img_size[0], batch_size=1).to(device)
-    # model = ConvAutoencoder().to(device)
+    # model = UAutoencoder(img_size[0], batch_size).to(device)
+    model = ConvAutoencoder().to(device)
     metrics = nn.BCELoss()
     
     weight_decay = 0.00005
@@ -86,59 +66,33 @@ def main():
     
     
     max_score = 0.0
-    lrs = []
+    train_loss = []
+    val_loss = []
     
-    # train_step = make_train_step(model, metrics, optimizer)
     
     for epoch in range(EPOCH):
         
-        currLoss = 0.0
+        train_epoch_loss = model.trainModel(metrics, optimizer, train_set, EPOCH)
+        _, val_epoch_loss = model.evaluate(metrics, val_set, batch_size, img_shape=(256, 256, 3))
         
-        
-        # print('\nEpoch: {}\n'.format(epoch))
-        
-        train_set = tqdm(train_set)
-        
-        for i, data in enumerate(train_set):
-            
-            inputs = data.to(device)
-            
-            if model.__class__.__name__=='UAutoencoder':
-                inputs = inputs.view(-1, img_size[0]*img_size[1])
-            
-            optimizer.zero_grad()
-            
-            outputs = model(inputs)
-            
-            loss = metrics(outputs, inputs)
-            
-            loss.backward()
-            
-            optimizer.step()
-            
-            currLoss += loss.item()
-            # loss = train_step(data.to(device))
-            # lrs.append(loss)
-            
-            train_set.set_description(f"Epoch [{epoch+1}/{EPOCH}]")
-            train_set.set_postfix(loss=loss.item())
-        
-        lrs.append(currLoss / len(train_set))
-        
+        train_loss.append(train_epoch_loss)
+        val_loss.append(val_epoch_loss)
         
         # do something (save model, change lr, etc.)
-        if max_score < currLoss / len(train_set):
-            max_score = currLoss / len(train_set)
+        if max_score < train_epoch_loss:
+            max_score = train_epoch_loss
             torch.save(model, './pytorch_best_model.pth')
             print('Model saved!')
+    
+    preds, _ = model.evaluate(metrics, val_set, batch_size, img_shape=(256, 256, 3))
     # Clear gpu memory
     torch.cuda.empty_cache()
-    
-    return model.predict(model, test_set, batch_size, img_shape=(256, 256, 3)), lrs
+    # return model.predict(metrics, test_set, batch_size, img_shape=(256, 256, 3)), lrs
+    return train_loss, val_loss, preds
 
 if __name__ == "__main__":
     try:
-        preds, loss = main()
+        train_loss, val_loss, preds = main()
     except Exception as e:
         # Clear gpu memory
         torch.cuda.empty_cache()
