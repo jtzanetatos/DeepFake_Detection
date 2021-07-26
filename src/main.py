@@ -7,7 +7,7 @@ Created on Sat Jul 24 22:57:43 2021
 
 import torch
 from Utils import Dataset, optimizers
-from Models import UAutoencoder, ConvAutoencoder
+from Models import UAutoencoder, ConvAutoencoder, SparceAutoencoder
 import torch.nn as nn
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
@@ -28,7 +28,7 @@ def main():
     alg = 'adam'
     img_size = (256, 256)
     segm_size = 1
-    batch_size = 6
+    batch_size = 1
     
     path = '../dataset/dataset1/'
     
@@ -57,7 +57,8 @@ def main():
                                            **kwargs)
     # OOM for Undercomplete encoder with batch size > 1
     # model = UAutoencoder(img_size[0], batch_size).to(device)
-    model = ConvAutoencoder().to(device)
+    model = SparceAutoencoder(img_size[0], batch_size).to(device)
+    # model = ConvAutoencoder(batch_size).to(device)
     metrics = nn.BCELoss()
     
     weight_decay = 0.00005
@@ -73,7 +74,7 @@ def main():
     for epoch in range(EPOCH):
         
         train_epoch_loss = model.trainModel(metrics, optimizer, train_set, EPOCH)
-        _, val_epoch_loss = model.evaluate(metrics, val_set, batch_size, img_shape=(256, 256, 3))
+        _, val_epoch_loss = model.evaluate(metrics, val_set, img_shape=(256, 256, 3))
         
         train_loss.append(train_epoch_loss)
         val_loss.append(val_epoch_loss)
@@ -84,7 +85,7 @@ def main():
             torch.save(model, './pytorch_best_model.pth')
             print('Model saved!')
     
-    preds, _ = model.evaluate(metrics, val_set, batch_size, img_shape=(256, 256, 3))
+    preds, _ = model.evaluate(metrics, val_set, img_shape=(256, 256, 3))
     # Clear gpu memory
     torch.cuda.empty_cache()
     # return model.predict(metrics, test_set, batch_size, img_shape=(256, 256, 3)), lrs
@@ -97,3 +98,4 @@ if __name__ == "__main__":
         # Clear gpu memory
         torch.cuda.empty_cache()
         sys.exit(print(e))
+    # TODO: Visualizations of metrics, 
