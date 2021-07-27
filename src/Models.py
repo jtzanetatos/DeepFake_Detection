@@ -110,28 +110,32 @@ class UAutoencoder(nn.Module):
             for i, data in enumerate(val_set):
                 
                 if data.shape[0] > 1:
-                    for j, batch in enumerate(data):
-                        tempPred = np.zeros((img_shape[0]*img_shape[1]*self.batch_size,
-                                             img_shape[2]))
-                        for k in range(img_shape[2]):
-                            tempPred[:,k], currLoss = self._output(metrics, data[:, k])
-                            # TODO: FIX OUPUTS
-                            loss += currLoss
-                        if j == 0:
-                            prevOut = tempPred[:img_shape[0]*img_shape[1]*(j+1), :]
-                        else:
-                            predOut = tempPred[img_shape[0]*img_shape[1]*j:
-                                                  img_shape[0]*img_shape[1]*(j+1), :]
-                            if j == 1:
-                                tempOut = np.stack((prevOut.reshape(img_shape),
-                                                    predOut.reshape(img_shape)),
-                                                   axis=2)
-                                del prevOut
-                                preds[idx] = tempOut
-                                del tempOut
-                            else:
-                                preds[idx] = np.stack((preds[idx], predOut.reshape(img_shape)), axis=2)
-                        idx += 1
+                    raise NotImplementedError
+                    # TODO: Fix batch processing
+                    # TODO: Code fix here:
+                    # for j, batch in enumerate(data):
+                    #     tempPred = np.zeros((img_shape[0]*img_shape[1]*self.batch_size,
+                    #                          img_shape[2]))
+                    #     for k in range(img_shape[2]):
+                    #         tempPred[:,k], currLoss = self._output(metrics, data[:, k])
+                            
+                    #         loss += currLoss
+                    #         # Iterate over batches
+                    #         for n in range(self.batch_size):
+                    #             if n == 0:
+                    #                 predOut = tempPred[:img_shape[0]*img_shape[1]*(j+1), k]
+                    #             else:
+                    #                 predOut = tempPred[img_shape[0]*img_shape[1]*j:
+                    #                               img_shape[0]*img_shape[1]*(j+1), k]
+                    #             if k == 0:
+                    #                 preds[idx+n] = predOut
+                    #             elif k > 1:
+                    #                 preds[idx+n] = np.dstack((preds[idx+n],
+                    #                                           predOut.reshape(self.inShape, self.inShape)))
+                    #             else:
+                    #                 preds[idx+n] = np.dstack((preds[idx+n],
+                    #                                           predOut)).reshape(self.inShape, self.inShape, 2)
+                    #     idx += self.batch_size
                 else:
                     tempPred = np.zeros((img_shape[0]*img_shape[1], img_shape[2]))
                     for k in range(img_shape[2]):
@@ -304,28 +308,8 @@ class SparceAutoencoder(nn.Module):
             for i, data in enumerate(val_set):
                 
                 if data.shape[0] > 1:
-                    for j, batch in enumerate(data):
-                        tempPred = np.zeros((img_shape[0]*img_shape[1]*self.batch_size,
-                                             img_shape[2]))
-                        for k in range(img_shape[2]):
-                            tempPred[:,k], currLoss = self._output(metrics, data[:, k])
-                            
-                            loss += currLoss
-                        if j == 0:
-                            prevOut = tempPred[:img_shape[0]*img_shape[1]*(j+1), :]
-                        else:
-                            predOut = tempPred[img_shape[0]*img_shape[1]*j:
-                                                  img_shape[0]*img_shape[1]*(j+1), :]
-                            if j == 1:
-                                tempOut = np.stack((prevOut.reshape(img_shape),
-                                                    predOut.reshape(img_shape)),
-                                                   axis=2)
-                                del prevOut
-                                preds[idx] = tempOut
-                                del tempOut
-                            else:
-                                preds[idx] = np.stack((preds[idx], predOut.reshape(img_shape)), axis=2)
-                        idx += 1
+                    raise NotImplementedError
+                    # TODO: Output code here
                 else:
                     tempPred = np.zeros((img_shape[0]*img_shape[1], img_shape[2]))
                     for k in range(img_shape[2]):
@@ -448,28 +432,8 @@ class VarAutoencoder(nn.Module):
             for i, data in enumerate(val_set):
                 
                 if data.shape[0] > 1:
-                    for j, batch in enumerate(data):
-                        tempPred = np.zeros((img_shape[0]*img_shape[1]*self.batch_size,
-                                             img_shape[2]))
-                        for k in range(img_shape[2]):
-                            tempPred[:,k], currLoss = self._output(metrics, data[:, k])
-                            
-                            loss += currLoss
-                        if j == 0:
-                            prevOut = tempPred[:img_shape[0]*img_shape[1]*(j+1), :]
-                        else:
-                            predOut = tempPred[img_shape[0]*img_shape[1]*j:
-                                                  img_shape[0]*img_shape[1]*(j+1), :]
-                            if j == 1:
-                                tempOut = np.stack((prevOut.reshape(img_shape),
-                                                    predOut.reshape(img_shape)),
-                                                   axis=2)
-                                del prevOut
-                                preds[idx] = tempOut
-                                del tempOut
-                            else:
-                                preds[idx] = np.stack((preds[idx], predOut.reshape(img_shape)), axis=2)
-                        idx += 1
+                    raise NotImplementedError
+                    # TODO: Output code here
                 else:
                     preds[i], currLoss = self._output(metrics, data)
                     
@@ -488,6 +452,7 @@ class VarAutoencoder(nn.Module):
         pred = pred.squeeze().cpu().numpy().round()
         
         return pred.T, loss.item()
+
 
 class ConvAutoencoder(nn.Module):
     def __init__(self, batch_size):
@@ -597,3 +562,58 @@ class ConvAutoencoder(nn.Module):
         pred = pred.squeeze().cpu().numpy().round()
         
         return pred.T, loss.item()
+
+class C_RAE(nn.Module):
+    '''
+    Convolutional ResNet Autoencoder
+    
+    Reference:
+        CHATHURIKA S. WICKRAMASINGHE , DANIEL L. MARINO ,
+        MILOS MANIC - ResNet Autoencoders for Unsupervised Feature
+                      Learning From High-Dimensional Data: Deep
+                      Models Resistant to Performance Degradation
+    
+    DOI: 10.1109/ACCESS.2021.3064819
+    '''
+    def __init__(self):
+        super(C_RAE, self).__init__()
+        
+        # Encoder
+        self.enc1 = nn.Sequential(
+            nn.Conv2d(in_channels=3,
+                      out_channels=16,
+                      kernel_size=3,
+                      padding=1),
+            nn.MaxPool2d(kernel_size=(2, 2)),
+            nn.LeakyReLU(),
+            )
+        
+        self.enc2 = nn.Sequential(
+            nn.Conv2d(in_channels=16,
+                      out_channels=16,
+                      kernel_size=3,
+                      padding=1),
+            nn.MaxPool2d(kernel_size=(2, 2)),
+            nn.LeakyReLU()
+            )
+        
+        # Decoder
+        self.dec1 = nn.Sequential(
+            nn.MaxUnpool2d(kernel_size=(2, 2)),
+            nn.ConvTranspose2d(in_channels=16,
+                               out_channels=16),
+            nn.LeakyReLU()
+            )
+        
+        self.dec2 = nn.Sequential(
+            nn.MaxUnpool2d(kernel_size=(2, 2)),
+            nn.ConvTranspose2d(in_channels=16,
+                               out_channels=3),
+            nn.LeakyReLU()
+            )
+    
+    def forward(self, x):
+        
+        # Encoder
+        x = F.relu(self.enc(x))
+        # TODO: Finish architecture
