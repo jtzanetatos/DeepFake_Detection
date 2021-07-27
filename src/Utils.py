@@ -7,12 +7,8 @@ Created on Sat Jul 24 23:03:22 2021
 
 import torch
 import os
-import numpy as np
-import cv2 as cv
 from PIL import Image
 import torchvision.transforms as T
-
-# TODO: Remove masks (?)
 
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, path, inputs, img_size, segm_size=4):

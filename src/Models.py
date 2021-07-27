@@ -60,7 +60,7 @@ class UAutoencoder(nn.Module):
             if data.shape[0] > 1:
                 for j, batch in enumerate(data):
                     for k in range(data.shape[1]):
-                        inputs = data[j, k].view(1, -1)
+                        inputs = data[:, k].reshape(1, -1)
                         inputs = inputs.to('cuda') if torch.cuda.is_available() else 'cpu'
                         
                         optimizer.zero_grad()
@@ -111,28 +111,45 @@ class UAutoencoder(nn.Module):
                 
                 if data.shape[0] > 1:
                     for j, batch in enumerate(data):
-                        tempPred = np.zeros((img_shape[0]*img_shape[1], img_shape[2]))
+                        tempPred = np.zeros((img_shape[0]*img_shape[1]*self.batch_size,
+                                             img_shape[2]))
                         for k in range(img_shape[2]):
-                            tempPred[:,k], currLoss = self._output(metrics, data[j, k], img_shape)
-                            
+                            tempPred[:,k], currLoss = self._output(metrics, data[:, k])
+                            # TODO: FIX OUPUTS
                             loss += currLoss
-                        preds[idx] = tempPred
+                        if j == 0:
+                            prevOut = tempPred[:img_shape[0]*img_shape[1]*(j+1), :]
+                        else:
+                            predOut = tempPred[img_shape[0]*img_shape[1]*j:
+                                                  img_shape[0]*img_shape[1]*(j+1), :]
+                            if j == 1:
+                                tempOut = np.stack((prevOut.reshape(img_shape),
+                                                    predOut.reshape(img_shape)),
+                                                   axis=2)
+                                del prevOut
+                                preds[idx] = tempOut
+                                del tempOut
+                            else:
+                                preds[idx] = np.stack((preds[idx], predOut.reshape(img_shape)), axis=2)
                         idx += 1
                 else:
                     tempPred = np.zeros((img_shape[0]*img_shape[1], img_shape[2]))
                     for k in range(img_shape[2]):
-                        tempPred[:,k], currLoss = self._output(metrics, data[0, k], img_shape)
+                        tempPred[:,k], currLoss = self._output(metrics, data[0, k])
                         loss += currLoss
                     preds[idx] = tempPred.reshape(img_shape)
                     idx += 1
                 val_set.set_description("Validation")
-                val_set.set_postfix(loss=loss)
+                val_set.set_postfix(loss=loss.item())
         
         return preds, loss.item()
     
-    def _output(self, metrics, data, img_shape):
+    def _output(self, metrics, data):
         
-        x_tensor = data.view(1, -1).to('cuda') if torch.cuda.is_available() else 'cpu'
+        if self.batch_size > 1:
+            x_tensor = data.reshape(1, -1).to('cuda') if torch.cuda.is_available() else 'cpu'
+        else:
+            x_tensor = data.view(1, -1).to('cuda') if torch.cuda.is_available() else 'cpu'
         pred = self.layers(x_tensor)
         loss = metrics(pred, x_tensor)
         pred = pred.squeeze().cpu().numpy().round()
@@ -187,19 +204,31 @@ class SparceAutoencoder(nn.Module):
         
         return torch.sigmoid(self.dec4(x))
     
-    def _sparceLoss(self, data):
+    def _klDiv(rho, rho_hat):
+        rho_hat = torch.mean(torch.sigmoid(rho_hat), 1)
+        rho = torch.tensor([rho] * len(rho_hat)).to('cuda') if torch.cuda.is_available() else 'cpu'
+        return torch.sum(rho * torch.log(rho/rho_hat) + (1-rho) * torch.log((1-rho)/(1-rho_hat)))
+    
+    def _sparceLoss(self, data, rho=None):
         
         loss = 0.0
         
         layers = list(self.children())
         
-        for i in range(len(layers)):
-            data = F.relu(layers[i](data))
-            loss += torch.mean(torch.abs(data))
+        # L1 Regularization
+        if self.sparcity.lower() == 'l1':
+            for i in range(len(layers)):
+                data = F.relu(layers[i](data))
+                loss += torch.mean(torch.abs(data))
+        # KL Divergence
+        else:
+            for i in range(len(layers)):
+                data = layers[i](data)
+                loss += self._klDiv(rho, data)
         
         return loss
     
-    def trainModel(self, metrics, optimizer, dataset, epochs):
+    def trainModel(self, metrics, optimizer, dataset, epochs, rho=None):
         
         self.train()
         
@@ -212,7 +241,7 @@ class SparceAutoencoder(nn.Module):
             if data.shape[0] > 1:
                 for j, batch in enumerate(data):
                     for k in range(data.shape[1]):
-                        inputs = data[j, k].view(1, -1)
+                        inputs = data[:, k].reshape(1, -1)
                         inputs = inputs.to('cuda') if torch.cuda.is_available() else 'cpu'
                         optimizer.zero_grad()
                         
@@ -224,6 +253,10 @@ class SparceAutoencoder(nn.Module):
                             l1 = self._sparceLoss(inputs)
                             
                             loss += self.reg * l1
+                        else:
+                            kl = self._sparceLoss(inputs, rho)
+                            
+                            loss += self.reg * kl
                         
                         loss.backward()
                         
@@ -272,26 +305,40 @@ class SparceAutoencoder(nn.Module):
                 
                 if data.shape[0] > 1:
                     for j, batch in enumerate(data):
-                        tempPred = np.zeros((img_shape[0]*img_shape[1], img_shape[2]))
+                        tempPred = np.zeros((img_shape[0]*img_shape[1]*self.batch_size,
+                                             img_shape[2]))
                         for k in range(img_shape[2]):
-                            tempPred[:,k], currLoss = self._output(metrics, data[j, k], img_shape)
+                            tempPred[:,k], currLoss = self._output(metrics, data[:, k])
                             
                             loss += currLoss
-                        preds[idx] = tempPred
+                        if j == 0:
+                            prevOut = tempPred[:img_shape[0]*img_shape[1]*(j+1), :]
+                        else:
+                            predOut = tempPred[img_shape[0]*img_shape[1]*j:
+                                                  img_shape[0]*img_shape[1]*(j+1), :]
+                            if j == 1:
+                                tempOut = np.stack((prevOut.reshape(img_shape),
+                                                    predOut.reshape(img_shape)),
+                                                   axis=2)
+                                del prevOut
+                                preds[idx] = tempOut
+                                del tempOut
+                            else:
+                                preds[idx] = np.stack((preds[idx], predOut.reshape(img_shape)), axis=2)
                         idx += 1
                 else:
                     tempPred = np.zeros((img_shape[0]*img_shape[1], img_shape[2]))
                     for k in range(img_shape[2]):
-                        tempPred[:,k], currLoss = self._output(metrics, data[0, k], img_shape)
+                        tempPred[:,k], currLoss = self._output(metrics, data[0, k])
                         loss += currLoss
                     preds[idx] = tempPred.reshape(img_shape)
                     idx += 1
                 val_set.set_description("Validation")
-                val_set.set_postfix(loss=loss)
+                val_set.set_postfix(loss=loss.item())
         
         return preds, loss.item()
     
-    def _output(self, metrics, data, img_shape):
+    def _output(self, metrics, data):
         
         x_tensor = data.view(1, -1).to('cuda') if torch.cuda.is_available() else 'cpu'
         pred = self.forward(x_tensor)
@@ -299,6 +346,148 @@ class SparceAutoencoder(nn.Module):
         pred = pred.squeeze().cpu().numpy().round()
         
         return pred.T, loss
+
+class VarAutoencoder(nn.Module):
+    
+    def __init__(self, img_size, batch_size, features=16):
+        super(VarAutoencoder, self).__init__()
+        
+        self.img_size = img_size
+        self.batch_size = batch_size
+        self.features = features
+        
+        # Encoder
+        self.enc1 = nn.Linear(in_features=self.img_size*self.img_size*self.batch_size,
+                              out_features=512)
+        self.enc2 = nn.Linear(in_features=512,
+                              out_features=self.features*2)
+        
+        # Decoder
+        self.dec1 = nn.Linear(in_features=self.features,
+                              out_features=512)
+        self.dec2 = nn.Linear(in_features=512,
+                              out_features=self.img_size*self.img_size*self.batch_size)
+        
+    def reparam(self, mu, log_var):
+        
+        std = torch.exp(0.5*log_var)
+        eps = torch.rand_like(std)
+        
+        return mu + (eps * std)
+    
+    def forward(self, x):
+        
+        # Encoding
+        x = F.relu(self.enc1(x))
+        x = self.enc2(x).view(-1, 2, )
+        
+        mu = x[:, 0, :]
+        log_var = x[:, 1, :]
+        
+        z = self.reparam(mu, log_var)
+        
+        # Decoding
+        x = F.relu(self.dec1(z))
+        
+        out = torch.sigmoid(self.dec2(x))
+        
+        return out, mu, log_var
+    
+    def fLoss(loss, mu, log_var):
+        
+        kl = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
+        
+        return loss + kl
+    
+    def trainModel(self, metrics, optimizer, dataset, epochs):
+        
+        self.train()
+        
+        currLoss = 0.0
+        
+        train_set = tqdm(dataset)
+        
+        for i, data in enumerate(train_set):
+            
+            
+            inputs = data.to('cuda') if torch.cuda.is_available() else 'cpu'
+            optimizer.zero_grad()
+            
+            outputs, mu, log_var = self.forward(inputs.view(1, -1))
+            
+            loss = metrics(outputs, inputs)
+            
+            loss = self.fLoss(loss, mu, log_var)
+            
+            loss.backward()
+            
+            optimizer.step()
+            
+            currLoss += loss.item()
+            
+            train_set.set_description(f"Epoch [{self.epochIdx+1}/{epochs}]")
+            train_set.set_postfix(loss=loss.item())
+            
+        self.epochIdx += 1
+        
+        return currLoss / len(dataset)
+    
+    def evaluate(self, metrics, dataset, img_shape):
+        
+        self.eval()
+        
+        preds = np.zeros(len(dataset)*self.batch_size, dtype=object)
+        
+        idx = 0
+        
+        loss = 0.0
+        
+        val_set = tqdm(dataset)
+        
+        with torch.no_grad():
+            for i, data in enumerate(val_set):
+                
+                if data.shape[0] > 1:
+                    for j, batch in enumerate(data):
+                        tempPred = np.zeros((img_shape[0]*img_shape[1]*self.batch_size,
+                                             img_shape[2]))
+                        for k in range(img_shape[2]):
+                            tempPred[:,k], currLoss = self._output(metrics, data[:, k])
+                            
+                            loss += currLoss
+                        if j == 0:
+                            prevOut = tempPred[:img_shape[0]*img_shape[1]*(j+1), :]
+                        else:
+                            predOut = tempPred[img_shape[0]*img_shape[1]*j:
+                                                  img_shape[0]*img_shape[1]*(j+1), :]
+                            if j == 1:
+                                tempOut = np.stack((prevOut.reshape(img_shape),
+                                                    predOut.reshape(img_shape)),
+                                                   axis=2)
+                                del prevOut
+                                preds[idx] = tempOut
+                                del tempOut
+                            else:
+                                preds[idx] = np.stack((preds[idx], predOut.reshape(img_shape)), axis=2)
+                        idx += 1
+                else:
+                    preds[i], currLoss = self._output(metrics, data)
+                    
+                    loss += currLoss
+                val_set.set_description("Validation")
+                val_set.set_postfix(loss=loss)
+        
+        return preds, loss
+    
+    def _output(self, metrics, data):
+        
+        x_tensor = data.to('cuda') if torch.cuda.is_available() else 'cpu'
+        pred, mu, log_var = self.forward(x_tensor)
+        loss = metrics(pred, x_tensor)
+        loss = self.fLoss(mu, log_var)
+        pred = pred.squeeze().cpu().numpy().round()
+        
+        return pred.T, loss.item()
 
 class ConvAutoencoder(nn.Module):
     def __init__(self, batch_size):
@@ -387,13 +576,12 @@ class ConvAutoencoder(nn.Module):
                 
                 if data.shape[0] > 1:
                     for j, batch in enumerate(data):
-                        preds[idx], currLoss = self._output(metrics, data[j].unsqueeze(0),
-                                                  img_shape)
+                        preds[idx], currLoss = self._output(metrics, data[j].unsqueeze(0))
                         idx += 1
                         
                         loss += currLoss
                 else:
-                    preds[i], currLoss = self._output(metrics, data, img_shape)
+                    preds[i], currLoss = self._output(metrics, data)
                     
                     loss += currLoss
                 val_set.set_description("Validation")
@@ -401,7 +589,7 @@ class ConvAutoencoder(nn.Module):
         
         return preds, loss
     
-    def _output(self, metrics, data, img_shape):
+    def _output(self, metrics, data):
         
         x_tensor = data.to('cuda') if torch.cuda.is_available() else 'cpu'
         pred = self.layers(x_tensor)
