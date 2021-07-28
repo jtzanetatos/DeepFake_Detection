@@ -7,10 +7,12 @@ Created on Sat Jul 24 22:57:43 2021
 
 import torch
 from Utils import Dataset, optimizers
-from Models import UAutoencoder, ConvAutoencoder, SparceAutoencoder, VarAutoencoder
+from Models import (UAutoencoder, ConvAutoencoder, SparceAutoencoder,
+                    C_RAE, ConvVAE)
 import torch.nn as nn
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
+import numpy as np
 import os
 import sys
 
@@ -22,12 +24,12 @@ def main():
     torch.backends.cudnn.benchmark = False
     device = "cuda" if torch.cuda.is_available() else "cpu"
     kwargs = {'num_workers': 1, 'pin_memory': True} if device=='cuda' else {}
-    EPOCH=1
+    EPOCH=10
     lr = 1e-3
     alg = 'adam'
     img_size = (256, 256)
     segm_size = 1
-    batch_size = 2
+    batch_size = 1
     
     path = '../dataset/dataset1/'
     
@@ -55,11 +57,13 @@ def main():
                                            shuffle=True,
                                            **kwargs)
     # OOM for Undercomplete encoder with batch size > 1
-    model = UAutoencoder(img_size[0], batch_size).to(device)
-    # model = SparceAutoencoder(img_size[0], batch_size, sparcity='kl').to(device)
+    # model = UAutoencoder(img_size[0], batch_size).to(device)
+    # model = SparceAutoencoder(img_size[0], batch_size, sparcity='l1').to(device)
     # model = ConvAutoencoder(batch_size).to(device)
-    # model = VarAutoencoder(img_size[0], batch_size).to(device)
-    metrics = nn.BCELoss()
+    # model = C_RAE(img_size[0], batch_size).to(device)
+    model = ConvVAE(batch_size).to(device)
+    
+    metrics=nn.BCELoss()
     
     weight_decay = 0.00005
     
@@ -74,7 +78,7 @@ def main():
     for epoch in range(EPOCH):
         
         train_epoch_loss = model.trainModel(metrics, optimizer, train_set, EPOCH)
-        _, val_epoch_loss = model.evaluate(metrics, val_set, img_shape=(256, 256, 3))
+        preds, val_epoch_loss = model.evaluate(metrics, val_set, img_shape=(256, 256, 3))
         
         train_loss.append(train_epoch_loss)
         val_loss.append(val_epoch_loss)
@@ -82,20 +86,25 @@ def main():
         # do something (save model, change lr, etc.)
         if max_score < train_epoch_loss:
             max_score = train_epoch_loss
-            torch.save(model, './pytorch_best_model.pth')
+            model.saveModel()
             print('Model saved!')
-    
-    preds, _ = model.evaluate(metrics, val_set, img_shape=(256, 256, 3))
     # Clear gpu memory
     torch.cuda.empty_cache()
-    # return model.predict(metrics, test_set, batch_size, img_shape=(256, 256, 3)), lrs
-    return train_loss, val_loss, preds
+    return EPOCH, train_loss, val_loss, preds
 
 if __name__ == "__main__":
-    # try:
-    train_loss, val_loss, preds = main()
-    # except Exception as e:
-    #     # Clear gpu memory
-    #     torch.cuda.empty_cache() if torch.cuda.is_available() else pass
-    #     sys.exit(print(e))
+    try:
+        epochs, train_loss, val_loss, preds = main()
+    except Exception as e:
+        # Clear gpu memory
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        sys.exit(print(e))
     # TODO: Visualizations of metrics, results
+    epochs = np.arange(1, epochs+1)
+    plt.plot(epochs, train_loss, label='Training loss')
+    plt.plot(epochs, val_loss, label='Validation loss')
+    plt.xlabel('Epochs')
+    plt.ylabel('Binary Cross-Entropy Loss')
+    plt.legend()
+    plt.show()
