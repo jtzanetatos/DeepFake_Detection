@@ -24,7 +24,7 @@ def main():
     torch.backends.cudnn.benchmark = False
     device = "cuda" if torch.cuda.is_available() else "cpu"
     kwargs = {'num_workers': 1, 'pin_memory': True} if device=='cuda' else {}
-    EPOCH=10
+    EPOCH=20
     lr = 1e-3
     alg = 'adam'
     img_size = (256, 256)
@@ -58,10 +58,10 @@ def main():
                                            **kwargs)
     # OOM for Undercomplete encoder with batch size > 1
     # model = UAutoencoder(img_size[0], batch_size).to(device)
-    # model = SparceAutoencoder(img_size[0], batch_size, sparcity='l1').to(device)
+    model = SparceAutoencoder(img_size[0], batch_size, sparcity='kl').to(device)
     # model = ConvAutoencoder(batch_size).to(device)
     # model = C_RAE(img_size[0], batch_size).to(device)
-    model = ConvVAE(batch_size).to(device)
+    # model = ConvVAE(batch_size).to(device)
     
     metrics=nn.BCELoss()
     
@@ -80,14 +80,18 @@ def main():
         train_epoch_loss = model.trainModel(metrics, optimizer, train_set, EPOCH)
         preds, val_epoch_loss = model.evaluate(metrics, val_set, img_shape=(256, 256, 3))
         
+        # train_epoch_loss = model.trainClass(metrics, optimizer, train_set, EPOCH)
+        # preds, val_epoch_loss = model.evaluateClass(metrics, val_set, img_shape=(256, 256, 3))
+        
         train_loss.append(train_epoch_loss)
         val_loss.append(val_epoch_loss)
         
         # do something (save model, change lr, etc.)
-        if max_score < train_epoch_loss:
-            max_score = train_epoch_loss
-            model.saveModel()
-            print('Model saved!')
+        if max_score < val_epoch_loss:
+            max_score = val_epoch_loss
+            model.saveWeights()
+    # Save weights
+    model.saveWeights()
     # Clear gpu memory
     torch.cuda.empty_cache()
     return EPOCH, train_loss, val_loss, preds
@@ -105,6 +109,6 @@ if __name__ == "__main__":
     plt.plot(epochs, train_loss, label='Training loss')
     plt.plot(epochs, val_loss, label='Validation loss')
     plt.xlabel('Epochs')
-    plt.ylabel('Binary Cross-Entropy Loss')
+    plt.ylabel('Loss')
     plt.legend()
     plt.show()

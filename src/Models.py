@@ -42,10 +42,27 @@ class UAutoencoder(nn.Module):
                       out_features=self.inShape*self.inShape*self.batch_size),
             nn.Sigmoid()
             )
+        
+        self.classifier = nn.Sequential(
+                            nn.Linear(self.inShape*self.inShape*self.batch_size * 7 * 7,
+                                      4096),
+                            nn.ReLU(),
+                            nn.Dropout(0.5),
+                            nn.Linear(4096, 4096),
+                            nn.ReLU(),
+                            nn.Dropout(0.5),
+                            nn.Linear(4096, 1)
+                            )
+        self.avgpool = nn.AdaptiveAvgPool2d(7)
     
     def forward(self, x):
         
         return self.layers(x)
+    
+    def classForward(self, x):
+        
+        x = self.avgpool(x)
+        return self.classifier(x.view(1, -1))
     
     def trainModel(self, metrics, optimizer, dataset, epochs):
         
@@ -160,11 +177,16 @@ class UAutoencoder(nn.Module):
         
         return pred.T, loss
     
-    def saveModel(self):
+    def trainClassifier(self, metrics, dataset, img_shape):
+        pass
+    
+    def saveWeights(self):
         torch.save(self.state_dict(), './pytorch_'+self.__class__.__name__+'_weights.pth')
+        print("Weights saved successfuly.")
     
     def loadWeights(self):
         self.load_state_dict(torch.load('./pytorch_'+self.__class__.__name__+'_weights.pth'))
+        print("Weights loaded successfuly.")
 
 
 class SparceAutoencoder(nn.Module):
@@ -337,11 +359,13 @@ class SparceAutoencoder(nn.Module):
         
         return pred.T, loss
     
-    def saveModel(self):
+    def saveWeights(self):
         torch.save(self.state_dict(), './pytorch_'+self.__class__.__name__+self.sparcity.lower()+'_weights.pth')
+        print("Weights saved successfuly.")
     
     def loadWeights(self):
         self.load_state_dict(torch.load('./pytorch_'+self.__class__.__name__+self.sparcity.lower()+'_weights.pth'))
+        print("Weights loaded successfuly.")
 
 # BUG: Loss function produces error, or nan values
 # class VarAutoencoder(nn.Module):
@@ -470,7 +494,7 @@ class SparceAutoencoder(nn.Module):
         
 #         return pred.T, loss.item()
     
-#     def saveModel(self):
+#     def saveWeights(self):
 #         torch.save(self.state_dict(), './pytorch_'+self.__class__.__name__+'_weights.pth')
     
 #     def loadWeights(self):
@@ -685,11 +709,13 @@ class ConvVAE(nn.Module):
         
         return pred.T, loss.item()
     
-    def saveModel(self):
+    def saveWeights(self):
         torch.save(self.state_dict(), './pytorch_'+self.__class__.__name__+'_weights.pth')
+        print("Weights saved successfuly.")
     
     def loadWeights(self):
         self.load_state_dict(torch.load('./pytorch_'+self.__class__.__name__+'_weights.pth'))
+        print("Weights loaded successfuly.")
 
 class ConvAutoencoder(nn.Module):
     def __init__(self, batch_size):
@@ -725,10 +751,28 @@ class ConvAutoencoder(nn.Module):
                       stride=2),
             nn.Sigmoid()
             )
+        
+        self.classifier = nn.Sequential(
+                    nn.Linear(256*256*3*self.batch_size,
+                              256),
+                    nn.ReLU(),
+                    nn.Dropout(0.5),
+                    nn.Linear(256, 128),
+                    nn.ReLU(),
+                    nn.Dropout(0.5),
+                    nn.Linear(128, 32),
+                    nn.ReLU(),
+                    nn.Linear(32, 1)
+                    )
     
     def forward(self, x):
         
         return self.layers(x)
+    
+    def classForward(self, x):
+        
+        x = self.forward(x)
+        return self.classifier(x.view(1, -1))
     
     def trainModel(self, metrics, optimizer, dataset, epochs):
         
@@ -744,7 +788,38 @@ class ConvAutoencoder(nn.Module):
             inputs = data.to('cuda') if torch.cuda.is_available() else 'cpu'
             optimizer.zero_grad()
             
-            outputs = self.layers(inputs)
+            outputs = self.forward(inputs)
+            
+            loss = metrics(outputs, inputs)
+            
+            loss.backward()
+            
+            optimizer.step()
+            
+            currLoss += loss.item()
+            
+            train_set.set_description(f"Epoch [{self.epochIdx+1}/{epochs}]")
+            train_set.set_postfix(loss=loss.item())
+            
+        self.epochIdx += 1
+        
+        return currLoss / len(dataset)
+    
+    def trainClass(self, metrics, optimizer, dataset, epochs):
+        
+        self.train()
+        
+        currLoss = 0.0
+        
+        train_set = tqdm(dataset)
+        
+        for i, data in enumerate(train_set):
+            
+            
+            inputs = data.to('cuda') if torch.cuda.is_available() else 'cpu'
+            optimizer.zero_grad()
+            
+            outputs = self.classForward(inputs)
             
             loss = metrics(outputs, inputs)
             
@@ -776,7 +851,7 @@ class ConvAutoencoder(nn.Module):
         with torch.no_grad():
             for i, data in enumerate(val_set):
                 
-                if data.shape[0] > 1:
+                if self.batch_size > 1:
                     for j, batch in enumerate(data):
                         preds[idx], currLoss = self._output(metrics, data[j].unsqueeze(0))
                         idx += 1
@@ -791,20 +866,63 @@ class ConvAutoencoder(nn.Module):
         
         return preds, loss / (len(dataset)*self.batch_size)
     
+    
     def _output(self, metrics, data):
         
         x_tensor = data.to('cuda') if torch.cuda.is_available() else 'cpu'
-        pred = self.layers(x_tensor)
+        pred = self.forward(x_tensor)
         loss = metrics(pred, x_tensor)
         pred = pred.squeeze().cpu().numpy().round()
         
         return pred.T, loss.item()
     
-    def saveModel(self):
+    def evaluateClass(self, metrics, dataset, img_shape):
+        
+        self.eval()
+        
+        preds = np.zeros(len(dataset)*self.batch_size, dtype=object)
+        
+        idx = 0
+        
+        loss = 0.0
+        
+        val_set = tqdm(dataset)
+        
+        with torch.no_grad():
+            for i, data in enumerate(val_set):
+                
+                if data.shape[0] > 1:
+                    for j, batch in enumerate(data):
+                        preds[idx], currLoss = self._outputClass(metrics, data[j].unsqueeze(0))
+                        idx += 1
+                        
+                        loss += currLoss
+                else:
+                    preds[i], currLoss = self._outputClass(metrics, data)
+                    
+                    loss += currLoss
+                val_set.set_description("Validation")
+                val_set.set_postfix(loss=loss)
+        
+        return preds, loss / (len(dataset)*self.batch_size)
+    
+    
+    def _outputClass(self, metrics, data):
+        
+        x_tensor = data.to('cuda') if torch.cuda.is_available() else 'cpu'
+        pred = self.classForward(x_tensor)
+        loss = metrics(pred, x_tensor)
+        pred = pred.squeeze().cpu().numpy().round()
+        
+        return pred.T, loss.item()
+    
+    def saveWeights(self):
         torch.save(self.state_dict(), './pytorch_'+self.__class__.__name__+'_weights.pth')
+        print("Weights saved successfuly.")
     
     def loadWeights(self):
         self.load_state_dict(torch.load('./pytorch_'+self.__class__.__name__+'_weights.pth'))
+        print("Weights loaded successfuly.")
 
 class C_RAE(nn.Module):
     '''
@@ -944,7 +1062,7 @@ class C_RAE(nn.Module):
         with torch.no_grad():
             for i, data in enumerate(val_set):
                 
-                if data.shape[0] > 1:
+                if self.batch_size > 1:
                     for j, batch in enumerate(data):
                         preds[idx], currLoss = self._output(metrics, data[j].unsqueeze(0))
                         idx += 1
@@ -968,8 +1086,10 @@ class C_RAE(nn.Module):
         
         return pred.T, loss.item()
     
-    def saveModel(self):
+    def saveWeights(self):
         torch.save(self.state_dict(), './pytorch_'+self.__class__.__name__+'_weights.pth')
+        print("Weights saved successfuly.")
     
     def loadWeights(self):
         self.load_state_dict(torch.load('./pytorch_'+self.__class__.__name__+'_weights.pth'))
+        print("Weights loaded successfuly.")
