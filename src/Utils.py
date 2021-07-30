@@ -9,56 +9,48 @@ import torch
 import os
 from PIL import Image
 import torchvision.transforms as T
+import numpy as np
 
 class Dataset(torch.utils.data.Dataset):
-    def __init__(self, path, inputs, img_size, segm_size=4):
+    def __init__(self, path, inputs, img_size):
         self.path = path
         self.img_size = img_size
+        
         self.transforms = T.Compose([
                         T.ToTensor(),
                         T.Normalize(mean=[0.485, 0.456, 0.406],
                                     std=[0.229, 0.224, 0.225],),
                         ])
-        self.segm_size=segm_size
-        # self.kernel_size=(self.img_size[0]//(segm_size//2),
-        #                   self.img_size[1]//(segm_size//2))
-        self.kernel_idx = 0
+        
         
         # load all image files, sorting them to
         # ensure that they are aligned
-        self.imgs = list(sorted(inputs))
+        # self.imgs = list(sorted(inputs))
+        self.imgs = inputs
     
     def __getitem__(self, idx):
-        # load images
-        img_path = os.path.join(self.path, self.imgs[idx])
-        img = Image.open(img_path).convert("RGB")
-        # Return top left kernel
-        # if self.kernel_idx == 0:
-        #     img = img.crop((0, 0, self.kernel_size[0], self.kernel_size[1]))
-        #     # Increment kernel index flag
-        #     self.kernel_idx += 1
-        # # Return top right kernel
-        # elif self.kernel_idx == 1:
-        #     img=img.crop((self.kernel_size[0], 0,
-        #                      self.img_size[1], self.kernel_size[1]))
-        #     # Increment kernel index flag
-        #     self.kernel_idx += 1
-        # # Return bottom left kernel
-        # elif self.kernel_idx == 2:
-        #     img=img.crop((0, self.kernel_size[1], self.kernel_size[0],
-        #                      self.img_size[1]))
-        #     # Increment kernel index flag
-        #     self.kernel_idx += 1
-        # # Return bootm right kernel
+        
+        # if isinstance(self.path, np.ndarray):
+        img_path = os.path.join(self.path[idx], self.imgs[idx])
+        
         # else:
-        #     img=img.crop((self.kernel_size[0], self.kernel_size[1],
-        #                      self.img_size[0], self.img_size[1]))
-        #     # Reset kernel index flag
-        #     self.kernel_idx = 0
+            # load images
+        # img_path = os.path.join(self.path, self.imgs[idx])
+        img = Image.open(img_path).convert("RGB")
         
-        img = self.transforms(img)
+        # if isinstance(self.path, np.ndarray):
+            # Get label from path
+        if 'real' in self.path[idx]:
+            y = 1
+        else:
+            y = 0
         
-        return img
+        return self.transforms(img), torch.tensor(y).float()
+        
+        # else:
+        # img = self.transforms(img)
+        
+        # return img
     
     def __len__(self):
         return len(self.imgs)
@@ -112,3 +104,34 @@ def optimizers(alg, lr, weight_decay, model):
                 }
     
     return learners[alg]
+
+def loadDataset(path):
+    
+    # Real images directory
+    real = os.listdir(os.path.join(path, 'real'))
+    
+    # Fake images directory
+    fake = os.listdir(os.path.join(path, 'fake'))
+    
+    train_set = real[:400] + fake[400:800]
+    train_paths = np.zeros(800, dtype=object)
+    train_paths[:400] = os.path.join(path, 'real')
+    train_paths[400:] = os.path.join(path, 'fake')
+    
+    
+    val_set = real[800:850] + fake[800:850]
+    
+    val_path = np.zeros(len(val_set), dtype=object)
+    val_path[:50] = os.path.join(path, 'real')
+    val_path[50:] = os.path.join(path, 'fake')
+    
+    test_set = real[850:900] + fake[850:900]
+    
+    test_path = np.zeros(len(test_set), dtype=object)
+    test_path[:50] = os.path.join(path, 'real')
+    test_path[50:] = os.path.join(path, 'fake')
+    test_labels = torch.zeros(len(test_set))
+    test_labels[:50] = 1
+    
+    return (train_set, train_paths, val_set,
+            val_path, test_set, test_path, test_labels)
