@@ -10,6 +10,7 @@ import torch.nn.functional as F
 import torch
 import numpy as np
 from tqdm import tqdm
+from torchmetrics.functional import f1, precision_recall
 
 class UAutoencoder(nn.Module):
     def __init__(self, img_size, batch_size):
@@ -44,16 +45,17 @@ class UAutoencoder(nn.Module):
             )
         
         self.classifier = nn.Sequential(
-                            nn.Linear(self.inShape*self.inShape*self.batch_size * 7 * 7,
-                                      4096),
+                            nn.Linear(self.inShape*self.inShape*self.batch_size,
+                                      512),
                             nn.ReLU(),
                             nn.Dropout(0.5),
-                            nn.Linear(4096, 4096),
+                            nn.Linear(512, 128),
                             nn.ReLU(),
                             nn.Dropout(0.5),
-                            nn.Linear(4096, 1)
+                            nn.Linear(128, 32),
+                            nn.ReLU(),
+                            nn.Linear(32, 1)
                             )
-        self.avgpool = nn.AdaptiveAvgPool2d(7)
     
     def forward(self, x):
         
@@ -61,7 +63,8 @@ class UAutoencoder(nn.Module):
     
     def classForward(self, x):
         
-        x = self.avgpool(x)
+        x = self.forward(x)
+        
         return self.classifier(x.view(1, -1))
     
     def trainModel(self, metrics, optimizer, dataset, epochs):
@@ -753,16 +756,18 @@ class ConvAutoencoder(nn.Module):
             )
         
         self.classifier = nn.Sequential(
+                    nn.Flatten(),
                     nn.Linear(256*256*3*self.batch_size,
-                              256),
-                    nn.ReLU(),
-                    nn.Dropout(0.5),
-                    nn.Linear(256, 128),
+                              128),
                     nn.ReLU(),
                     nn.Dropout(0.5),
                     nn.Linear(128, 32),
                     nn.ReLU(),
-                    nn.Linear(32, 1)
+                    nn.Dropout(0.5),
+                    nn.Linear(32, 16),
+                    nn.ReLU(),
+                    nn.Linear(16, 1*self.batch_size),
+                    nn.Sigmoid()
                     )
     
     def forward(self, x):
@@ -815,13 +820,13 @@ class ConvAutoencoder(nn.Module):
         
         for i, data in enumerate(train_set):
             
-            
-            inputs = data.to('cuda') if torch.cuda.is_available() else 'cpu'
+            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            inputs = data[0].to(device)
             optimizer.zero_grad()
             
             outputs = self.classForward(inputs)
             
-            loss = metrics(outputs, inputs)
+            loss = metrics(outputs, data[1].unsqueeze(0).to(device))
             
             loss.backward()
             
@@ -880,9 +885,7 @@ class ConvAutoencoder(nn.Module):
         
         self.eval()
         
-        preds = np.zeros(len(dataset)*self.batch_size, dtype=object)
-        
-        idx = 0
+        preds = []
         
         loss = 0.0
         
@@ -891,16 +894,12 @@ class ConvAutoencoder(nn.Module):
         with torch.no_grad():
             for i, data in enumerate(val_set):
                 
-                if data.shape[0] > 1:
-                    for j, batch in enumerate(data):
-                        preds[idx], currLoss = self._outputClass(metrics, data[j].unsqueeze(0))
-                        idx += 1
-                        
-                        loss += currLoss
-                else:
-                    preds[i], currLoss = self._outputClass(metrics, data)
-                    
-                    loss += currLoss
+                pred, currLoss = self._outputClass(metrics, data)
+                
+                preds.append(pred)
+                
+                loss += currLoss
+                
                 val_set.set_description("Validation")
                 val_set.set_postfix(loss=loss)
         
@@ -909,9 +908,11 @@ class ConvAutoencoder(nn.Module):
     
     def _outputClass(self, metrics, data):
         
-        x_tensor = data.to('cuda') if torch.cuda.is_available() else 'cpu'
+        
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        x_tensor = data[0].to(device)
         pred = self.classForward(x_tensor)
-        loss = metrics(pred, x_tensor)
+        loss = metrics(pred, data[1].unsqueeze(0).to(device))
         pred = pred.squeeze().cpu().numpy().round()
         
         return pred.T, loss.item()
@@ -921,12 +922,17 @@ class ConvAutoencoder(nn.Module):
         print("Weights saved successfuly.")
     
     def loadWeights(self):
-        self.load_state_dict(torch.load('./pytorch_'+self.__class__.__name__+'_weights.pth'))
+        weights = torch.load('./pytorch_'+self.__class__.__name__+'_weights.pth')
+        
+        for name, param in weights.items():
+            if name not in self.state_dict():
+                continue
+            self.state_dict()[name].copy_(param.data)
         print("Weights loaded successfuly.")
 
 class C_RAE(nn.Module):
     '''
-    Convolutional ResNet Autoencoder
+    ResNet Autoencoder
     
     Reference:
         CHATHURIKA S. WICKRAMASINGHE , DANIEL L. MARINO ,
@@ -950,6 +956,7 @@ class C_RAE(nn.Module):
                       kernel_size=2,
                       padding=1,
                       stride=1),
+            nn.BatchNorm2d(num_features=16),
             nn.LeakyReLU(),
             
             nn.Conv2d(in_channels=16,
@@ -957,7 +964,7 @@ class C_RAE(nn.Module):
                       kernel_size=2,
                       padding=0,
                       stride=1),
-            
+            nn.BatchNorm2d(num_features=16),
             nn.LeakyReLU()
             )
         
@@ -967,8 +974,7 @@ class C_RAE(nn.Module):
                       kernel_size=2,
                       padding=0,
                       stride=2),
-            
-            nn.LeakyReLU()
+            nn.BatchNorm2d(num_features=16),
             )
         
         # Decoder
@@ -978,6 +984,7 @@ class C_RAE(nn.Module):
                                kernel_size=3,
                                padding=1,
                                stride=1),
+            nn.BatchNorm2d(num_features=3),
             nn.LeakyReLU(),
             
             nn.ConvTranspose2d(in_channels=3,
@@ -985,6 +992,7 @@ class C_RAE(nn.Module):
                                kernel_size=3,
                                padding=1,
                                stride=1),
+            nn.BatchNorm2d(num_features=3),
             nn.LeakyReLU()
             )
         
@@ -994,10 +1002,24 @@ class C_RAE(nn.Module):
                                kernel_size=2,
                                padding=0,
                                stride=2),
-            nn.LeakyReLU()
+            nn.BatchNorm2d(num_features=3)
             )
         
-        self.batchNorm1 = nn.BatchNorm2d(num_features=16)
+        self.classifier = nn.Sequential(
+                    nn.Flatten(),
+                    nn.Linear(256*256*3*self.batch_size,
+                              128),
+                    nn.ReLU(),
+                    # nn.Dropout(0.5),
+                    nn.Linear(128, 32),
+                    nn.ReLU(),
+                    # nn.Dropout(0.5),
+                    nn.Linear(32, 16),
+                    nn.ReLU(),
+                    nn.Linear(16, 1*self.batch_size),
+                    nn.Sigmoid()
+                    )
+    
     
     def forward(self, x):
         
@@ -1005,9 +1027,8 @@ class C_RAE(nn.Module):
         res = self.resenc(x) # Residual layers
         x = self.enc(res)
         
-        # Add residual layers output
-        x = torch.add(x, res)
-        x = self.batchNorm1(x)
+        # Add residual layers output - Eqivelant to nn.Bilinear in principle
+        x = F.relu(torch.add(x, res))
         
         # Decoder
         res = self.resdec(x) # Residual layers
@@ -1015,6 +1036,11 @@ class C_RAE(nn.Module):
         x = self.dec(res)
         
         return torch.sigmoid(torch.add(x, res))
+    
+    def classForward(self, x):
+        
+        x = self.forward(x)
+        return self.classifier(x.view(1, -1))
     
     def trainModel(self, metrics, optimizer, dataset, epochs):
         
@@ -1042,6 +1068,51 @@ class C_RAE(nn.Module):
             
             train_set.set_description(f"Epoch [{self.epochIdx+1}/{epochs}]")
             train_set.set_postfix(loss=loss.item())
+            
+        self.epochIdx += 1
+        
+        return currLoss / len(dataset)
+    
+    def trainClass(self, metrics, optimizer, dataset, epochs):
+        
+        self.train()
+        
+        currLoss = 0.0
+        
+        f1_score = 0.0
+        
+        prec = 0.0
+        
+        rec = 0.0
+        
+        train_set = tqdm(dataset)
+        
+        for i, data in enumerate(train_set):
+            
+            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            inputs = data[0].to(device)
+            optimizer.zero_grad()
+            
+            outputs = self.classForward(inputs)
+            
+            loss = metrics(outputs, data[1].unsqueeze(0).to(device))
+            
+            loss.backward()
+            
+            optimizer.step()
+            
+            currLoss += loss.item()
+            
+            f1_score += f1(outputs, data[1].unsqueeze(0).int().to(device), num_classes=2)
+            
+            prec_rec = precision_recall(outputs, data[1].unsqueeze(0).int().to(device), num_classes=2)
+            
+            prec += prec_rec[0].item()
+            
+            rec += prec_rec[1].item()
+            
+            train_set.set_description(f"Epoch [{self.epochIdx+1}/{epochs}]")
+            train_set.set_postfix(loss=loss.item(), f1_score=f1_score.item(), prec=prec, rec=rec)
             
         self.epochIdx += 1
         
@@ -1086,10 +1157,64 @@ class C_RAE(nn.Module):
         
         return pred.T, loss.item()
     
+    def evaluateClass(self, metrics, dataset, img_shape):
+        
+        self.eval()
+        
+        preds = []
+        
+        f1_score = 0.0
+        
+        prec = 0.0
+        
+        rec = 0.0
+        
+        loss = 0.0
+        
+        val_set = tqdm(dataset)
+        
+        with torch.no_grad():
+            for i, data in enumerate(val_set):
+                
+                pred, currLoss = self._outputClass(metrics, data)
+                
+                f1_score += f1(pred, data[1].unsqueeze(0).int().to('cuda'), num_classes=2)
+                
+                prec_rec = precision_recall(pred, data[1].unsqueeze(0).int().to('cuda'), num_classes=2)
+                
+                prec += prec_rec[0].item()
+            
+                rec += prec_rec[1].item()
+                
+                preds.append(pred.squeeze().cpu().numpy().round())
+                
+                loss += currLoss
+                
+                val_set.set_description("Validation")
+                val_set.set_postfix(loss=loss, f1_score=f1_score.item(), prec=prec, rec=rec)
+        
+        return preds, loss / (len(dataset)*self.batch_size)
+    
+    
+    def _outputClass(self, metrics, data):
+        
+        
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        x_tensor = data[0].to(device)
+        pred = self.classForward(x_tensor)
+        loss = metrics(pred, data[1].unsqueeze(0).to(device))
+        
+        return pred, loss.item()
+    
     def saveWeights(self):
         torch.save(self.state_dict(), './pytorch_'+self.__class__.__name__+'_weights.pth')
         print("Weights saved successfuly.")
     
     def loadWeights(self):
-        self.load_state_dict(torch.load('./pytorch_'+self.__class__.__name__+'_weights.pth'))
+        weights = torch.load('./pytorch_'+self.__class__.__name__+'_weights.pth')
+        
+        for name, param in weights.items():
+            if name not in self.state_dict():
+                continue
+            self.state_dict()[name].copy_(param.data)
         print("Weights loaded successfuly.")
